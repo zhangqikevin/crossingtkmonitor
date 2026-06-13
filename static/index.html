@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok Live Monitor</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #181b25;
+    --panel2: #1f2330;
+    --border: #2a2f40;
+    --text: #e8eaf0;
+    --muted: #8b91a5;
+    --accent: #fe2c55;
+    --accent2: #25f4ee;
+    --green: #3ddc84;
+    --yellow: #ffce45;
+    --purple: #6c5ce7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    font-size: 14px; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; white-space: nowrap; }
+  header h1 .tk { color: var(--accent); }
+  #url-input {
+    flex: 1; min-width: 240px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  #url-input:focus { outline: none; border-color: var(--accent2); }
+  button {
+    padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 14px; font-weight: 600;
+  }
+  #connect-btn { background: var(--accent); color: #fff; }
+  #connect-btn.connected { background: var(--border); color: var(--text); }
+  #connect-btn:disabled { opacity: .6; cursor: wait; }
+  #status-pill {
+    display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--muted);
+    max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  #status-pill.connecting #status-dot { background: var(--yellow); animation: blink 1s infinite; }
+  #status-pill.connected #status-dot { background: var(--green); }
+  #status-pill.error #status-dot { background: var(--accent); }
+  @keyframes blink { 50% { opacity: .3; } }
+
+  #room-bar {
+    display: none; align-items: center; gap: 12px; padding: 8px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  #room-bar.visible { display: flex; }
+  #room-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--panel2); object-fit: cover; }
+  #room-title { font-weight: 600; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #room-host { color: var(--muted); font-size: 12px; }
+  #room-meta { margin-left: auto; color: var(--muted); font-size: 12px; display: flex; gap: 14px; align-items: center; }
+  #room-json-btn { background: var(--panel2); color: var(--muted); padding: 4px 10px; font-size: 12px; border: 1px solid var(--border); }
+
+  #stats {
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; padding: 8px 16px;
+    background: var(--bg);
+  }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; text-align: center; }
+  .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .stat .v.viewers { color: var(--accent2); }
+  .stat .v.likes { color: var(--accent); }
+  .stat .v.diamonds { color: var(--yellow); }
+
+  /* Break session banner (mock data) */
+  #break-stats {
+    display: grid; grid-template-columns: 1.2fr 1.3fr 1fr 1.3fr; gap: 8px;
+    padding: 0 16px 8px;
+  }
+  .bs-block {
+    background: linear-gradient(160deg, #1d2030 0%, #181b25 100%);
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px;
+    position: relative; overflow: hidden;
+  }
+  .bs-block::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent2), transparent);
+    opacity: .5;
+  }
+  .bs-label { font-size: 10px; letter-spacing: .1em; color: var(--muted); font-weight: 700; }
+  .bs-value { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .bs-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .bs-total { border-color: rgba(255,206,69,.45); }
+  .bs-total::before { background: linear-gradient(90deg, transparent, var(--yellow), transparent); opacity: .8; }
+  .bs-total .bs-value { color: var(--yellow); animation: glow 2.2s ease-in-out infinite; }
+  @keyframes glow {
+    0%, 100% { text-shadow: 0 0 6px rgba(255,206,69,.25); }
+    50% { text-shadow: 0 0 18px rgba(255,206,69,.65); }
+  }
+  .bs-top .bs-value { color: var(--green); }
+  .bs-top .bs-value .rec {
+    font-size: 9px; font-weight: 800; letter-spacing: .08em; color: #0f1117;
+    background: var(--green); border-radius: 4px; padding: 2px 6px; vertical-align: middle; margin-left: 8px;
+    animation: blink 1.4s infinite;
+  }
+  .bs-rank ol { list-style: none; margin-top: 4px; }
+  .bs-rank li { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 2px 0; }
+  .bs-rank li .rn { color: var(--accent2); font-weight: 700; }
+  .bs-rank li b { margin-left: auto; color: var(--yellow); font-variant-numeric: tabular-nums; }
+
+  main {
+    flex: 1; display: grid; gap: 8px; padding: 0 16px 12px;
+    grid-template-columns: 1.4fr 1.1fr 1fr 1.4fr; min-height: 0;
+  }
+  main > * { min-width: 0; }
+  .left-col { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+  .left-col .panel:last-child { flex: 1; }
+  #video { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; }
+  #video-quality { display: flex; gap: 6px; padding: 6px 8px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+  #video-quality:empty { display: none; }
+  .q-btn { font-size: 11px; padding: 3px 12px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .q-btn.active { color: var(--accent2); border-color: var(--accent2); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .panel-head {
+    padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-head .cnt { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .panel-body { flex: 1; overflow-y: auto; padding: 6px 8px; min-height: 0; }
+  .panel-body::-webkit-scrollbar { width: 6px; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .row { display: flex; gap: 8px; padding: 5px 4px; border-bottom: 1px solid rgba(42,47,64,.5); align-items: flex-start; animation: fadein .25s; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(-4px); } }
+  .row img.av { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: var(--panel2); }
+  .row .body { min-width: 0; flex: 1; }
+  .row .nick { color: var(--accent2); font-size: 12px; font-weight: 600; word-break: break-all; }
+  .row .txt { word-break: break-word; }
+  .row .time { color: var(--muted); font-size: 10px; flex-shrink: 0; margin-top: 2px; }
+  .row.gift .txt { color: var(--yellow); }
+  .row .gift-img { width: 28px; height: 28px; vertical-align: middle; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--panel2); color: var(--muted); }
+  .badge.streak { color: var(--yellow); border: 1px solid var(--yellow); }
+  .badge.done { color: var(--green); }
+  .it-join { color: var(--muted); }
+  .it-like { color: var(--accent); }
+  .it-follow { color: var(--green); }
+  .it-share { color: var(--accent2); }
+  .it-sub { color: var(--yellow); }
+
+  /* AI Co-pilot panel (mock) */
+  #cp-body { padding: 8px 12px 10px; }
+  .cp-label { font-size: 10px; letter-spacing: .1em; color: var(--muted); font-weight: 700; }
+  .cp-card { font-size: 14px; font-weight: 700; margin: 4px 0 6px; animation: fadein .4s; }
+  .cp-card b { color: var(--green); }
+  #cp-reasons { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cp-chip { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--border); color: var(--accent2); }
+  .cp-queue { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  /* Card panel */
+  .card-thumb {
+    width: 96px; height: auto; border-radius: 6px; flex-shrink: 0;
+    background: var(--panel2); align-self: flex-start;
+  }
+  .card-top { display: flex; gap: 12px; padding: 4px 2px 8px; }
+  .card-head-right { min-width: 0; flex: 1; }
+  .card-name { font-size: 17px; font-weight: 800; line-height: 1.35; }
+  .card-cat { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .card-prices { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 12px; }
+  .card-prices .card-label { padding: 0 0 2px; }
+  .card-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 2px 10px; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
+  .chip b { color: var(--text); }
+  .card-label { font-size: 10px; letter-spacing: .08em; color: var(--muted); padding: 8px 2px 2px; display: flex; align-items: center; justify-content: space-between; }
+  .period-tabs { letter-spacing: 0; }
+  .period-tabs span { margin-left: 6px; cursor: default; }
+  .period-tabs .on { color: var(--accent2); border-bottom: 1px solid var(--accent2); }
+  .card-price { font-size: 24px; font-weight: 800; padding: 0 2px; }
+  .card-alt { font-size: 22px; font-weight: 800; padding: 0 2px; }
+  .card-range { font-size: 11px; color: var(--muted); padding: 0 2px 4px; }
+  .spark { width: 100%; height: 80px; display: block; padding: 0 2px; }
+  .spark-months { display: flex; justify-content: space-between; font-size: 8.5px; color: var(--muted); padding: 0 4px 6px; }
+  .pop-grid { display: grid; gap: 5px; padding: 4px 2px 6px; }
+  .pop-grid.psa { grid-template-columns: repeat(4, 1fr); }
+  .pop-cell { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; text-align: center; padding: 5px 2px; }
+  .pop-cell .g { font-size: 11px; font-weight: 700; }
+  .pop-cell .p { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pop-cell.active { border-color: var(--accent2); }
+  .pop-cell.active .p { color: var(--accent2); }
+  .tx-head { background: var(--panel2); border-radius: 6px; padding: 5px 8px; font-size: 10px; letter-spacing: .08em; color: var(--muted); margin: 8px 2px 4px; }
+  .tx-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid rgba(42,47,64,.5); }
+  .tx-row .src { font-size: 10px; font-weight: 800; width: 36px; flex-shrink: 0; }
+  .tx-row .src.ebay { color: #ffce45; }
+  .tx-row .kind { color: var(--purple); font-size: 12px; font-weight: 600; }
+  .tx-row .date { color: var(--muted); font-size: 10px; }
+  .tx-row .amt { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* Events feed */
+  #feed-controls { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  #feed-filter { flex: 1; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; }
+  #pause-btn { padding: 4px 10px; font-size: 12px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  #pause-btn.paused { color: var(--yellow); border-color: var(--yellow); }
+  .ev { border-bottom: 1px solid rgba(42,47,64,.5); }
+  .ev summary { display: flex; gap: 8px; align-items: center; padding: 4px; cursor: pointer; list-style: none; }
+  .ev summary::-webkit-details-marker { display: none; }
+  .ev .ename { font-size: 12px; font-weight: 600; color: var(--accent2); }
+  .ev .esum { font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev pre {
+    font-size: 11px; background: var(--bg); padding: 8px; border-radius: 6px; margin: 4px;
+    overflow-x: auto; max-height: 300px; overflow-y: auto; color: #b8c4e0; white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* Event type stats */
+  #type-stats { font-size: 12px; }
+  .ts-row { display: flex; justify-content: space-between; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+  .ts-row:hover { background: var(--panel2); }
+  .ts-row.active { background: var(--panel2); outline: 1px solid var(--accent2); }
+  .ts-row .n { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .ts-row .c { color: var(--accent2); font-variant-numeric: tabular-nums; }
+
+  .right-col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .right-col .panel:first-child { flex: 0 0 32%; }
+  .right-col .panel:last-child { flex: 1; }
+
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+    width: min(800px, 90vw); max-height: 80vh; padding: 16px;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog pre { font-size: 11px; overflow: auto; max-height: 65vh; white-space: pre-wrap; word-break: break-all; color: #b8c4e0; }
+  dialog .close { float: right; background: var(--panel2); color: var(--text); border: 1px solid var(--border); padding: 4px 12px; }
+
+  .empty { color: var(--muted); text-align: center; padding: 24px 8px; font-size: 12px; }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(260px, 1fr); overflow-y: auto; }
+    #stats { grid-template-columns: repeat(4, 1fr); }
+    #break-stats { grid-template-columns: 1fr 1fr; }
+    body { overflow: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="tk">TikTok</span> Live Monitor</h1>
+  <input id="url-input" placeholder="Enter a LIVE url, e.g. https://www.tiktok.com/@username/live, or just @username" />
+  <button id="connect-btn">Connect</button>
+  <div id="status-pill"><span id="status-dot"></span><span id="status-text">Not connected</span></div>
+  <a href="/brain" style="color:var(--accent2);font-size:12px;text-decoration:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;white-space:nowrap">🧠 Collection Brain</a>
+</header>
+
+<div id="room-bar">
+  <img id="room-avatar" alt="">
+  <div>
+    <div id="room-title">—</div>
+    <div id="room-host">—</div>
+  </div>
+  <div id="room-meta">
+    <span id="room-id"></span>
+    <span id="room-start"></span>
+    <button id="room-json-btn">View full room info</button>
+  </div>
+</div>
+
+<div id="stats">
+  <div class="stat"><div class="v viewers" id="s-viewers">—</div><div class="l">Viewers</div></div>
+  <div class="stat"><div class="v likes" id="s-likes">—</div><div class="l">Total Likes</div></div>
+  <div class="stat"><div class="v" id="s-comments">0</div><div class="l">Comments (session)</div></div>
+  <div class="stat"><div class="v" id="s-gifts">0</div><div class="l">Gifts (session)</div></div>
+  <div class="stat"><div class="v diamonds" id="s-diamonds">0</div><div class="l">Diamonds (session)</div></div>
+  <div class="stat"><div class="v" id="s-joins">0</div><div class="l">Joins (session)</div></div>
+  <div class="stat"><div class="v" id="s-follows">0</div><div class="l">New Follows (session)</div></div>
+  <div class="stat"><div class="v" id="s-shares">0</div><div class="l">Shares (session)</div></div>
+</div>
+
+<!-- Break session banner — mock numbers for demo -->
+<div id="break-stats">
+  <div class="bs-block bs-total">
+    <div class="bs-label">💰 TOTAL VALUE PULLED</div>
+    <div class="bs-value" id="bs-total">$12,847</div>
+    <div class="bs-sub" id="bs-total-sub">142 cards · 38 packs opened</div>
+  </div>
+  <div class="bs-block bs-top">
+    <div class="bs-label">🏆 TOP PULL THIS STREAM</div>
+    <div class="bs-value" id="bs-top">$1,450 <span class="rec">NEW RECORD</span></div>
+    <div class="bs-sub" id="bs-top-sub">Charizard GX Rainbow Rare #150 · PSA 10</div>
+  </div>
+  <div class="bs-block">
+    <div class="bs-label">🔥 BIG HITS ($100+)</div>
+    <div class="bs-value" id="bs-hits">9</div>
+    <div class="bs-sub" id="bs-hits-sub">Hit rate 6.3% · Avg $338/pack</div>
+  </div>
+  <div class="bs-block bs-rank">
+    <div class="bs-label">👑 TOP RIPPERS (TOTAL SPEND)</div>
+    <ol id="bs-rank-list">
+      <li><span class="rn">🥇</span> cardshark88 <b>$2,340</b></li>
+      <li><span class="rn">🥈</span> pokefan_mia <b>$1,875</b></li>
+      <li><span class="rn">🥉</span> mewtwo_max <b>$1,420</b></li>
+    </ol>
+  </div>
+</div>
+
+<main>
+  <div class="left-col">
+    <div class="panel" style="flex:0 0 auto">
+      <div class="panel-head">📺 Live Video <span class="cnt" id="video-state">Not connected</span></div>
+      <video id="video" controls muted playsinline></video>
+      <div id="video-quality"></div>
+    </div>
+    <div class="panel" style="flex:0 0 auto">
+      <div class="panel-head">🤖 AI Co-pilot <span class="cnt">demo</span></div>
+      <div id="cp-body">
+        <div class="cp-label">NEXT CARD TO FEATURE</div>
+        <div class="cp-card" id="cp-card">2019 Unified Minds Mew/Mewtwo Gx #71 · <b>est. $746</b></div>
+        <div id="cp-reasons">
+          <span class="cp-chip">💬 4 viewers asked in chat</span>
+          <span class="cp-chip">📈 comps up 4.2% this week</span>
+          <span class="cp-chip">🐋 2 whales active now</span>
+        </div>
+        <div class="cp-queue" id="cp-queue">Up next: Charizard GX #150 · Blastoise VMAX #102</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">🃏 Card</div>
+      <div class="panel-body" id="p-card">
+        <div class="card-top">
+          <img class="card-thumb" src="/card_front.png" alt="Card front">
+          <div class="card-head-right">
+            <div class="card-name">2019 Pokemon Sun and Moon Unified Minds Mew/Mewtwo Gx #71</div>
+            <div class="card-cat">Pokemon Cards</div>
+            <div class="card-prices">
+              <div>
+                <div class="card-label">LIST PRICE</div>
+                <div class="card-price">$999</div>
+              </div>
+              <div>
+                <div class="card-label">ALT VALUE</div>
+                <div class="card-alt">$746</div>
+                <div class="card-range">$676 – $823</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card-chips">
+          <span class="chip">PSA <b>10</b></span>
+          <span class="chip">POP <b>2,602</b></span>
+          <span class="chip">♡ 4 Watching</span>
+        </div>
+        <div class="card-label">PRICE HISTORY
+          <span class="period-tabs"><span>1W</span><span>1M</span><span>3M</span><span class="on">1Y</span><span>YTD</span></span>
+        </div>
+        <svg class="spark" viewBox="0 0 300 80" preserveAspectRatio="none">
+          <path d="M0,62 C20,61 35,63 50,61 C65,59 80,62 95,60 C110,58 120,62 135,61 C150,60 160,63 175,61 C190,59 200,60 215,57 C230,54 240,48 255,38 C270,28 285,20 300,16"
+                fill="none" stroke="#3ddc84" stroke-width="2"/>
+          <path d="M0,62 C20,61 35,63 50,61 C65,59 80,62 95,60 C110,58 120,62 135,61 C150,60 160,63 175,61 C190,59 200,60 215,57 C230,54 240,48 255,38 C270,28 285,20 300,16 L300,80 L0,80 Z"
+                fill="rgba(61,220,132,.08)" stroke="none"/>
+        </svg>
+        <div class="spark-months">
+          <span>JUL</span><span>AUG</span><span>SEP</span><span>OCT</span><span>NOV</span><span>DEC</span>
+          <span>JAN</span><span>FEB</span><span>MAR</span><span>APR</span><span>MAY</span><span>JUN</span>
+        </div>
+        <div class="card-label">PSA POPULATION</div>
+        <div class="pop-grid psa">
+          <div class="pop-cell active"><div class="g">10</div><div class="p">2,602</div></div>
+          <div class="pop-cell"><div class="g">9</div><div class="p">2,440</div></div>
+          <div class="pop-cell"><div class="g">8.5</div><div class="p">3</div></div>
+          <div class="pop-cell"><div class="g">8</div><div class="p">665</div></div>
+        </div>
+        <div class="tx-head">RECENT TRANSACTIONS</div>
+        <div class="tx-row">
+          <div><div class="kind">Best offer</div><div class="date">Jun 9, 2026</div></div>
+          <span class="amt">$775</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Best offer</div><div class="date">Jun 9, 2026</div></div>
+          <span class="amt">$701</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Auction</div><div class="date">Jun 8, 2026</div></div>
+          <span class="amt">$785</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Buy now</div><div class="date">Jun 8, 2026</div></div>
+          <span class="amt">$725</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Auction</div><div class="date">Jun 5, 2026</div></div>
+          <span class="amt">$740</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Buy now</div><div class="date">Jun 2, 2026</div></div>
+          <span class="amt">$759</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Best offer</div><div class="date">May 28, 2026</div></div>
+          <span class="amt">$712</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Auction</div><div class="date">May 24, 2026</div></div>
+          <span class="amt">$698</span>
+        </div>
+        <div class="tx-row">
+          <div><div class="kind">Buy now</div><div class="date">May 19, 2026</div></div>
+          <span class="amt">$730</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head">💬 Comments <span class="cnt" id="c-comments">0</span></div>
+    <div class="panel-body" id="p-comments"><div class="empty">Waiting for comments…</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head">👥 Interactions</div>
+    <div class="panel-body" id="p-social"><div class="empty">Waiting for interactions…</div></div>
+  </div>
+  <div class="right-col">
+    <div class="panel">
+      <div class="panel-head">📊 Event Types <span class="cnt" id="c-types">0 types</span></div>
+      <div class="panel-body" id="type-stats"><div class="empty">No events yet</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">📡 All Events <span class="cnt" id="c-total">0</span></div>
+      <div id="feed-controls">
+        <input id="feed-filter" placeholder="Filter by event name, e.g. Gift" />
+        <button id="pause-btn">⏸ Pause</button>
+      </div>
+      <div class="panel-body" id="p-feed"><div class="empty">Raw events will appear here once connected</div></div>
+    </div>
+  </div>
+</main>
+
+<dialog id="json-dialog">
+  <button class="close" onclick="document.getElementById('json-dialog').close()">Close</button>
+  <h3 style="margin-bottom:10px">Full room info (room_info)</h3>
+  <pre id="json-dialog-pre"></pre>
+</dialog>
+
+<script src="/mpegts.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const MAX_ROWS = 200;
+const MAX_FEED = 400;
+
+// ---------- Helpers ----------
+const fmt = n => n == null ? '—' : Number(n).toLocaleString('en-US');
+const now = ts => new Date((ts || Date.now()/1000) * 1000).toLocaleTimeString('en-GB', {hour12: false});
+const urlOf = img => {
+  if (!img) return '';
+  const list = img.url_list || img.m_urls || img.urls;
+  return Array.isArray(list) && list.length ? list[0] : '';
+};
+const userOf = d => d && (d.user || d.user_info || d.from_user) || null;
+const nickOf = u => u && (u.nick_name || u.nickname || u.special_id || (u.id ? 'uid:' + u.id : '')) || 'Unknown user';
+const avatarOf = u => u ? (urlOf(u.avatar_thumb) || urlOf(u.avatar_medium) || urlOf(u.avatar_large)) : '';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const avImg = u => { const a = avatarOf(u); return a ? `<img class="av" src="${esc(a)}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<img class="av" style="visibility:hidden">'; };
+
+// Batched rendering: inserting rows one-by-one steals the main thread from video
+// during event bursts, so new nodes are queued and flushed once per frame
+// (every 300ms when the tab is hidden).
+const pendingNodes = []; // {panelId, node}
+let flushScheduled = false;
+const PANEL_CAPS = { 'p-feed': MAX_FEED };
+
+function enqueueNode(panelId, node) {
+  pendingNodes.push({panelId, node});
+  if (pendingNodes.length > 600) pendingNodes.splice(0, pendingNodes.length - 600);
+  if (flushScheduled) return;
+  flushScheduled = true;
+  const run = () => { flushScheduled = false; flushNodes(); };
+  if (document.hidden) setTimeout(run, 300);
+  else requestAnimationFrame(run);
+}
+
+function flushNodes() {
+  const byPanel = new Map();
+  for (const {panelId, node} of pendingNodes) {
+    if (!byPanel.has(panelId)) byPanel.set(panelId, []);
+    byPanel.get(panelId).push(node);
+  }
+  pendingNodes.length = 0;
+  for (const [panelId, nodes] of byPanel) {
+    const panel = $(panelId);
+    const empty = panel.querySelector('.empty');
+    if (empty) empty.remove();
+    const frag = document.createDocumentFragment();
+    for (let i = nodes.length - 1; i >= 0; i--) frag.appendChild(nodes[i]); // newest on top
+    panel.prepend(frag);
+    const cap = PANEL_CAPS[panelId] || MAX_ROWS;
+    while (panel.children.length > cap) panel.lastChild.remove();
+  }
+}
+
+function addRow(panelId, html, cls = '') {
+  const div = document.createElement('div');
+  div.className = 'row ' + cls;
+  div.innerHTML = html;
+  enqueueNode(panelId, div);
+}
+
+// ---------- State ----------
+let ws = null;
+let uiState = 'idle'; // idle | connecting | connected
+const stats = { comments: 0, gifts: 0, diamonds: 0, joins: 0, follows: 0, shares: 0, total: 0 };
+const typeCounts = new Map();
+let roomInfo = null, paused = false, filterText = '', activeTypeFilter = '';
+const feedBuffer = [];
+
+function setStatus(state, text) {
+  $('status-pill').className = state || '';
+  $('status-text').textContent = text;
+}
+
+function resetAll() {
+  stopVideo();
+  Object.keys(stats).forEach(k => stats[k] = 0);
+  typeCounts.clear();
+  roomInfo = null;
+  ['p-comments','p-social','p-feed','type-stats'].forEach(id => $(id).innerHTML = '<div class="empty">Waiting for data…</div>');
+  ['s-comments','s-gifts','s-diamonds','s-joins','s-follows','s-shares'].forEach(id => $(id).textContent = '0');
+  $('s-viewers').textContent = '—'; $('s-likes').textContent = '—';
+  $('c-comments').textContent = '0';
+  $('c-total').textContent = '0'; $('c-types').textContent = '0 types';
+  $('room-bar').classList.remove('visible');
+}
+
+// ---------- WebSocket (a single connection for the whole page) ----------
+let wsReady = null; // Promise<WebSocket>; concurrent requests during the handshake share it
+
+function getWS() {
+  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(ws);
+  if (wsReady) return wsReady;
+  wsReady = new Promise((resolve, reject) => {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const sock = new WebSocket(`${proto}://${location.host}/ws`);
+    sock.onopen = () => { ws = sock; resolve(sock); };
+    sock.onmessage = e => handleMessage(JSON.parse(e.data));
+    sock.onerror = () => reject(new Error('WebSocket connection failed'));
+    sock.onclose = () => {
+      ws = null; wsReady = null;
+      setUIState('idle');
+      stopVideo();
+      setStatus('error', 'Lost connection to server — please reconnect');
+    };
+  });
+  return wsReady;
+}
+
+function setUIState(state) {
+  uiState = state;
+  const btn = $('connect-btn');
+  btn.disabled = false;
+  btn.textContent = state === 'idle' ? 'Connect' : state === 'connecting' ? 'Cancel' : 'Disconnect';
+  btn.classList.toggle('connected', state !== 'idle');
+}
+
+let btnBusy = false; // click in flight (incl. WS handshake); ignore re-entrant clicks
+let lastClickAt = 0; // 350ms debounce so an accidental double-click doesn't cancel the connect
+$('connect-btn').onclick = async () => {
+  if (btnBusy || Date.now() - lastClickAt < 350) return;
+  lastClickAt = Date.now();
+  btnBusy = true;
+  const btn = $('connect-btn');
+  try {
+    if (uiState !== 'idle') {
+      // connecting → cancel; connected → disconnect. Button state follows server status messages
+      btn.disabled = true;
+      try { (await getWS()).send(JSON.stringify({action: 'disconnect'})); } catch (e) {}
+      return;
+    }
+    const url = $('url-input').value.trim();
+    if (!url) { $('url-input').focus(); return; }
+    btn.disabled = true;
+    setStatus('connecting', 'Connecting to server…');
+    let sock;
+    try {
+      sock = await getWS();
+    } catch (e) {
+      setUIState('idle');
+      setStatus('error', 'Cannot reach the server — refresh the page and retry');
+      return;
+    }
+    resetAll();
+    setUIState('connecting');
+    sock.send(JSON.stringify({action: 'connect', url}));
+  } finally {
+    btnBusy = false;
+  }
+};
+$('url-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('connect-btn').click(); });
+
+function handleMessage(msg) {
+  if (msg.type === 'status') {
+    if (msg.state === 'connecting') { setUIState('connecting'); setStatus('connecting', msg.message); }
+    else if (msg.state === 'connected') { setUIState('connected'); setStatus('connected', msg.message); }
+    else if (msg.state === 'error') { setUIState('idle'); setStatus('error', msg.message); stopVideo(); }
+    else { setUIState('idle'); setStatus('', msg.message || 'Disconnected'); stopVideo(); }
+  } else if (msg.type === 'room_info') {
+    roomInfo = msg.data;
+    renderRoomInfo(msg.data);
+  } else if (msg.type === 'stream') {
+    setupVideo(msg.data);
+  } else if (msg.type === 'event') {
+    stats.total++;
+    $('c-total').textContent = fmt(stats.total);
+    typeCounts.set(msg.name, (typeCounts.get(msg.name) || 0) + 1);
+    renderTypeStats();
+    dispatchEvent_(msg);
+    pushFeed(msg);
+  }
+}
+
+// ---------- Live video ----------
+const QUALITY_ORDER = ['ORIGIN', 'UHD1', 'FULL_HD1', 'HD1', 'SD2', 'SD1'];
+const QUALITY_NAMES = {ORIGIN: 'Original', UHD1: 'UHD', FULL_HD1: 'FHD', HD1: 'HD', SD2: 'SD', SD1: 'Low'};
+let player = null, streamInfo = null, currentFlv = null, stallTimer = null;
+
+function setupVideo(streams) {
+  streamInfo = streams;
+  const flv = streams.flv || {};
+  const keys = Object.keys(flv).sort((a, b) => {
+    const ia = QUALITY_ORDER.indexOf(a), ib = QUALITY_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const qbox = $('video-quality');
+  qbox.innerHTML = '';
+  keys.forEach((k, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'q-btn' + (i === 0 ? ' active' : '');
+    btn.textContent = QUALITY_NAMES[k] || k;
+    btn.onclick = () => {
+      qbox.querySelectorAll('.q-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      playFlv(flv[k], QUALITY_NAMES[k] || k);
+    };
+    qbox.appendChild(btn);
+  });
+  if (keys.length) {
+    playFlv(flv[keys[0]], QUALITY_NAMES[keys[0]] || keys[0]);
+  } else if (streams.hls) {
+    $('video').src = streams.hls;
+    $('video').play().catch(() => {});
+    $('video-state').textContent = 'Playing (HLS)';
+  } else {
+    $('video-state').textContent = 'No video stream available';
+  }
+}
+
+function playFlv(url, label) {
+  currentFlv = {url, label};
+  startPlayer();
+}
+
+function startPlayer() {
+  stopVideo(false);
+  const video = $('video');
+  const {url, label} = currentFlv;
+  if (window.mpegts && mpegts.getFeatureList().mseLivePlayback) {
+    player = mpegts.createPlayer(
+      // relative URLs are unreliable inside the worker, use an absolute one
+      {type: 'flv', isLive: true, url: location.origin + '/proxy/flv?url=' + encodeURIComponent(url)},
+      {
+        enableWorker: true,            // demux off the main thread, immune to render bursts
+        enableStashBuffer: true,       // smoothness first: small buffer absorbs network jitter
+        stashInitialSize: 128 * 1024,
+        lazyLoad: false,
+        autoCleanupSourceBuffer: true,
+        liveBufferLatencyChasing: true, // only chase live edge when >3s behind
+        liveBufferLatencyMaxLatency: 3.0,
+        liveBufferLatencyMinRemain: 1.0,
+      }
+    );
+    player.attachMediaElement(video);
+    player.load();
+    video.play().catch(() => {});
+    $('video-state').textContent = `Playing · ${label} (muted by default)`;
+    startWatchdog();
+  } else if (streamInfo && streamInfo.hls && video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = streamInfo.hls;
+    video.play().catch(() => {});
+    $('video-state').textContent = 'Playing (HLS)';
+  } else {
+    $('video-state').textContent = 'This browser cannot play the stream';
+  }
+}
+
+// Watchdog: if the picture freezes for 5s while playing, reconnect the current quality
+function startWatchdog() {
+  stopWatchdog();
+  let lastT = -1, stuck = 0;
+  stallTimer = setInterval(() => {
+    const v = $('video');
+    if (!player || !currentFlv || v.paused) return;
+    if (v.currentTime === lastT) {
+      if (++stuck >= 5) {
+        stuck = 0;
+        $('video-state').textContent = 'Stalled — reconnecting…';
+        startPlayer();
+      }
+    } else {
+      stuck = 0;
+      lastT = v.currentTime;
+    }
+  }, 1000);
+}
+
+function stopWatchdog() {
+  if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
+}
+
+function stopVideo(clear = true) {
+  if (player) { try { player.destroy(); } catch (e) {} player = null; }
+  const video = $('video');
+  video.removeAttribute('src');
+  if (clear) {
+    stopWatchdog();
+    currentFlv = null;
+    $('video-quality').innerHTML = '';
+    $('video-state').textContent = 'Not connected';
+    streamInfo = null;
+    video.load();
+  }
+}
+
+// ---------- Room info ----------
+function renderRoomInfo(info) {
+  $('room-bar').classList.add('visible');
+  $('room-title').textContent = info.title || '(untitled)';
+  const owner = info.owner || {};
+  $('room-host').textContent = `Host: ${owner.nickname || owner.nick_name || '?'}` + (owner.display_id ? ` (@${owner.display_id})` : '');
+  const av = urlOf(owner.avatar_thumb) || urlOf(owner.avatar_medium);
+  if (av) $('room-avatar').src = av;
+  $('room-id').textContent = info.id ? `Room ID: ${info.id}` : '';
+  if (info.create_time) $('room-start').textContent = 'Started ' + new Date(info.create_time * 1000).toLocaleString('en-US');
+  if (info.user_count != null) $('s-viewers').textContent = fmt(info.user_count);
+  if (info.like_count != null) $('s-likes').textContent = fmt(info.like_count);
+  if (info.stats && info.stats.like_count != null) $('s-likes').textContent = fmt(info.stats.like_count);
+}
+$('room-json-btn').onclick = () => {
+  $('json-dialog-pre').textContent = JSON.stringify(roomInfo, null, 2);
+  $('json-dialog').showModal();
+};
+
+// ---------- Dispatch events to panels ----------
+function dispatchEvent_(msg) {
+  const d = msg.data || {};
+  const u = userOf(d);
+  const t = `<span class="time">${now(msg.ts)}</span>`;
+
+  switch (msg.name) {
+    case 'CommentEvent': {
+      stats.comments++;
+      $('s-comments').textContent = fmt(stats.comments);
+      $('c-comments').textContent = fmt(stats.comments);
+      addRow('p-comments', `${avImg(u)}<div class="body"><div class="nick">${esc(nickOf(u))}</div><div class="txt">${esc(d.content || d.comment || '')}</div></div>${t}`);
+      break;
+    }
+    case 'EmoteChatEvent': {
+      stats.comments++;
+      $('s-comments').textContent = fmt(stats.comments);
+      $('c-comments').textContent = fmt(stats.comments);
+      const emotes = (d.emote_list || (d.emote ? [d.emote] : []))
+        .map(e => urlOf(e.image)).filter(Boolean)
+        .map(src => `<img class="gift-img" src="${esc(src)}">`).join('');
+      addRow('p-comments', `${avImg(u)}<div class="body"><div class="nick">${esc(nickOf(u))}</div><div class="txt">${emotes || '[emote]'}</div></div>${t}`);
+      break;
+    }
+    case 'GiftEvent': {
+      const g = d.m_gift || d.gift || {};
+      const streakable = g.type === 1;
+      const streaking = streakable && !d.repeat_end;
+      const count = d.repeat_count || 1;
+      const diamonds = (g.diamond_count || 0) * count;
+      if (!streaking) {
+        stats.gifts++;
+        stats.diamonds += diamonds;
+        $('s-gifts').textContent = fmt(stats.gifts);
+        $('s-diamonds').textContent = fmt(stats.diamonds);
+      }
+      const gi = urlOf(g.image) || urlOf(g.icon);
+      addRow('p-social',
+        `${avImg(u)}<div class="body"><div class="nick">${esc(nickOf(u))}</div>` +
+        `<div class="txt">sent ${gi ? `<img class="gift-img" src="${esc(gi)}">` : ''} ${esc(g.name || 'a gift')} ×${count}` +
+        ` <span class="badge ${streaking ? 'streak' : 'done'}">${streaking ? 'combo…' : '💎 ' + fmt(diamonds)}</span></div></div>${t}`, 'gift');
+      break;
+    }
+    case 'JoinEvent': {
+      stats.joins++;
+      $('s-joins').textContent = fmt(stats.joins);
+      addRow('p-social', `${avImg(u)}<div class="body it-join"><span class="nick">${esc(nickOf(u))}</span> joined the LIVE</div>${t}`);
+      break;
+    }
+    case 'LikeEvent': {
+      if (d.total != null) { $('s-likes').textContent = fmt(d.total); }
+      addRow('p-social', `${avImg(u)}<div class="body it-like"><span class="nick">${esc(nickOf(u))}</span> liked ×${d.count || 1} ❤️</div>${t}`);
+      break;
+    }
+    case 'FollowEvent': {
+      stats.follows++;
+      $('s-follows').textContent = fmt(stats.follows);
+      addRow('p-social', `${avImg(u)}<div class="body it-follow"><span class="nick">${esc(nickOf(u))}</span> followed the host ⭐</div>${t}`);
+      break;
+    }
+    case 'ShareEvent': {
+      stats.shares++;
+      $('s-shares').textContent = fmt(stats.shares);
+      addRow('p-social', `${avImg(u)}<div class="body it-share"><span class="nick">${esc(nickOf(u))}</span> shared the LIVE 🔗</div>${t}`);
+      break;
+    }
+    case 'SubscribeEvent': {
+      addRow('p-social', `${avImg(u)}<div class="body it-sub"><span class="nick">${esc(nickOf(u))}</span> subscribed 🎖️</div>${t}`);
+      break;
+    }
+    case 'RoomUserSeqEvent': {
+      const v = d.m_total ?? d.total ?? d.total_user;
+      if (v != null) $('s-viewers').textContent = fmt(v);
+      break;
+    }
+    case 'LiveEndEvent': {
+      setStatus('error', 'The LIVE has ended');
+      break;
+    }
+    case 'LivePauseEvent': {
+      setStatus('connecting', 'Host paused the stream');
+      break;
+    }
+    case 'LiveUnpauseEvent': {
+      setStatus('connected', 'Stream resumed');
+      break;
+    }
+  }
+}
+
+// ---------- All events feed ----------
+function summarize(name, d) {
+  const u = userOf(d);
+  const parts = [];
+  if (u) parts.push(nickOf(u));
+  if (d.content) parts.push(d.content);
+  if (d.m_gift && d.m_gift.name) parts.push(d.m_gift.name + ' ×' + (d.repeat_count || 1));
+  if (d.count != null) parts.push('count=' + d.count);
+  if (d.m_total != null) parts.push('viewers=' + d.m_total);
+  return parts.join(' · ');
+}
+
+function feedVisible(name) {
+  const f = (activeTypeFilter || filterText).toLowerCase();
+  return !f || name.toLowerCase().includes(f);
+}
+
+function pushFeed(msg) {
+  if (paused) { feedBuffer.push(msg); if (feedBuffer.length > MAX_FEED) feedBuffer.shift(); return; }
+  renderFeedItem(msg);
+}
+
+function renderFeedItem(msg) {
+  if (!feedVisible(msg.name)) return;
+  const det = document.createElement('details');
+  det.className = 'ev';
+  det.dataset.name = msg.name;
+  const sum = document.createElement('summary');
+  sum.innerHTML = `<span class="ename">${esc(msg.name)}</span><span class="esum">${esc(summarize(msg.name, msg.data || {}))}</span><span class="time">${now(msg.ts)}</span>`;
+  det.appendChild(sum);
+  det.addEventListener('toggle', () => {
+    if (det.open && !det.querySelector('pre')) {
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(msg.data, null, 2);
+      det.appendChild(pre);
+    }
+  }, {once: false});
+  enqueueNode('p-feed', det);
+}
+
+$('pause-btn').onclick = () => {
+  paused = !paused;
+  const btn = $('pause-btn');
+  btn.classList.toggle('paused', paused);
+  btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  if (!paused) { feedBuffer.forEach(renderFeedItem); feedBuffer.length = 0; }
+};
+$('feed-filter').addEventListener('input', e => {
+  filterText = e.target.value.trim();
+  activeTypeFilter = '';
+  applyFeedFilter();
+  renderTypeStats();
+});
+function applyFeedFilter() {
+  document.querySelectorAll('#p-feed .ev').forEach(el => {
+    el.style.display = feedVisible(el.dataset.name) ? '' : 'none';
+  });
+}
+
+// ---------- AI Co-pilot (mock rotation for demo) ----------
+const CP_RECS = [
+  { card: '2019 Unified Minds Mew/Mewtwo Gx #71 · <b>est. $746</b>',
+    reasons: ['💬 4 viewers asked in chat', '📈 comps up 4.2% this week', '🐋 2 whales active now'],
+    queue: 'Up next: Charizard GX #150 · Blastoise VMAX #102' },
+  { card: 'Charizard GX Rainbow Rare #150 · <b>est. $1,450</b>',
+    reasons: ['🔥 chat hype score 92/100', '⏱ viewer retention dipping — play a hit', '📈 record sale 2 days ago'],
+    queue: 'Up next: Blastoise VMAX #102 · Pikachu Illustrator reprint' },
+  { card: 'Blastoise VMAX Secret #102 · <b>est. $310</b>',
+    reasons: ['🐋 top ripper bid on water-types ×3', '📦 4 copies in inventory — clear position', '💬 “blastoise” mentioned 7×'],
+    queue: 'Up next: Pikachu V #043 · Gengar VMAX #271' },
+];
+let cpIdx = 0;
+setInterval(() => {
+  cpIdx = (cpIdx + 1) % CP_RECS.length;
+  const r = CP_RECS[cpIdx];
+  const cardEl = $('cp-card');
+  cardEl.innerHTML = r.card;
+  cardEl.style.animation = 'none'; void cardEl.offsetWidth; cardEl.style.animation = '';
+  $('cp-reasons').innerHTML = r.reasons.map(x => `<span class="cp-chip">${x}</span>`).join('');
+  $('cp-queue').textContent = r.queue;
+}, 15000);
+
+// ---------- Event type stats ----------
+let typeStatsTimer = null;
+function renderTypeStats() {
+  if (typeStatsTimer) return;
+  typeStatsTimer = setTimeout(() => {
+    typeStatsTimer = null;
+    const panel = $('type-stats');
+    const rows = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
+    $('c-types').textContent = rows.length + ' types';
+    panel.innerHTML = rows.map(([n, c]) =>
+      `<div class="ts-row ${activeTypeFilter === n ? 'active' : ''}" data-name="${esc(n)}"><span class="n">${esc(n)}</span><span class="c">${fmt(c)}</span></div>`
+    ).join('');
+    panel.querySelectorAll('.ts-row').forEach(el => {
+      el.onclick = () => {
+        activeTypeFilter = activeTypeFilter === el.dataset.name ? '' : el.dataset.name;
+        $('feed-filter').value = '';
+        filterText = '';
+        applyFeedFilter();
+        renderTypeStats();
+      };
+    });
+  }, 300);
+}
+</script>
+</body>
+</html>
